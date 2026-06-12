@@ -2,8 +2,8 @@
 namespace Gratis\DB;
 
 /** Scans active plugins/themes for MySQL-specific features incompatible with SQLite. */
-final class CompatibilityScanner
-{
+final class CompatibilityScanner {
+
     private const INCOMPATIBLE_PATTERNS = [
         'FULLTEXT'           => 'FULLTEXT indexes (not supported in SQLite)',
         'SPATIAL'            => 'Spatial indexes',
@@ -15,8 +15,7 @@ final class CompatibilityScanner
     ];
 
     /** @return array{compatible: bool, issues: array, scanned: int} */
-    public function scan(): array
-    {
+    public function scan(): array {
         $issues = [];
         $scanned = 0;
 
@@ -33,7 +32,7 @@ final class CompatibilityScanner
             $dir = WP_PLUGIN_DIR . '/' . dirname($plugin);
             if (!is_dir($dir)) continue;
             $found = $this->scanDirectory($dir);
-            $scanned++;
+            ++$scanned;
             foreach ($found as $issue) {
                 $issues[] = array_merge($issue, ['source' => 'plugin:' . dirname($plugin)]);
             }
@@ -43,7 +42,7 @@ final class CompatibilityScanner
         $themeDir = get_stylesheet_directory();
         if (is_dir($themeDir)) {
             $found = $this->scanDirectory($themeDir);
-            $scanned++;
+            ++$scanned;
             foreach ($found as $issue) {
                 $issues[] = array_merge($issue, ['source' => 'theme:' . get_stylesheet()]);
             }
@@ -57,17 +56,22 @@ final class CompatibilityScanner
         ];
     }
 
-    private function scanDirectory(string $dir): array
-    {
+    private function scanDirectory(string $dir): array {
         $issues = [];
         $it = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
         );
 
         foreach ($it as $file) {
-            if ($file->getExtension() !== 'php') continue;
+            if ($file->getExtension() !== 'php') {
+                continue;
+            }
+            // Reading a local plugin/theme PHP file to scan for SQL patterns, not a remote URL.
+            // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
             $content = @file_get_contents($file->getPathname());
-            if (!$content) continue;
+            if (!$content) {
+                continue;
+            }
 
             foreach (self::INCOMPATIBLE_PATTERNS as $pattern => $description) {
                 if (stripos($content, $pattern) !== false) {
