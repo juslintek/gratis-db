@@ -49,10 +49,12 @@ final class Settings {
         return round($value, 4);
     }
 
-    /** Register the admin-post handlers (optimize + clear log). */
+    /** Register the admin-post handlers (optimize + clear log + migrate + rollback). */
     public static function register_actions(): void {
         add_action('admin_post_gratis_db_optimize', [__CLASS__, 'handle_optimize']);
         add_action('admin_post_gratis_db_clear_log', [__CLASS__, 'handle_clear_log']);
+        add_action('admin_post_gratis_db_migrate', [__CLASS__, 'handle_migrate']);
+        add_action('admin_post_gratis_db_rollback', [__CLASS__, 'handle_rollback']);
     }
 
     /** Optimize all tables (nonce + capability gated). */
@@ -86,6 +88,46 @@ final class Settings {
         exit;
     }
 
+    /** Run the MySQL → SQLite migration (nonce + capability gated). */
+    public static function handle_migrate(): void {
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('You do not have permission to migrate the database.', 'gratis-db'));
+        }
+        check_admin_referer('gratis_db_migrate');
+
+        $args = ['page' => self::PAGE];
+        try {
+            $result = (new Migrator())->migrate(false, true);
+            $args['gratis_db_migrated'] = empty($result['verification']['mismatches']) ? 'ok' : 'mismatch';
+        } catch (\Throwable $e) {
+            set_transient('gratis_db_migrate_error', $e->getMessage(), 120);
+            $args['gratis_db_migrated'] = 'error';
+        }
+
+        wp_safe_redirect(add_query_arg($args, admin_url('tools.php')));
+        exit;
+    }
+
+    /** Roll back the SQLite switch by removing the drop-in (nonce + capability gated). */
+    public static function handle_rollback(): void {
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('You do not have permission to do that.', 'gratis-db'));
+        }
+        check_admin_referer('gratis_db_rollback');
+
+        $result = (new DropinManager())->uninstall();
+        $args   = ['page' => self::PAGE];
+        if (!empty($result['error'])) {
+            set_transient('gratis_db_migrate_error', $result['error'], 120);
+            $args['gratis_db_migrated'] = 'error';
+        } else {
+            $args['gratis_db_migrated'] = 'rolledback';
+        }
+
+        wp_safe_redirect(add_query_arg($args, admin_url('tools.php')));
+        exit;
+    }
+
     /** Render the admin screen. */
     public static function render_page(): void {
         if (!current_user_can('manage_options')) {
@@ -102,11 +144,41 @@ final class Settings {
             echo '<div class="notice notice-success is-dismissible"><p>' . esc_html(sprintf(/* translators: %d: table count. */ _n('Optimized %d table.', 'Optimized %d tables.', $count, 'gratis-db'), $count)) . '</p></div>';
         }
 
+        self::render_migration_notice();
+
         self::render_status();
+        self::render_migration();
         self::render_optimizer();
         self::render_slow_log();
 
         echo '</div>';
+    }
+
+    /** Render the migration result notice based on the redirect flag. */
+    private static function render_migration_notice(): void {
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display flag.
+        if (!isset($_GET['gratis_db_migrated'])) {
+            return;
+        }
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only display flag.
+        $status = sanitize_key(wp_unslash($_GET['gratis_db_migrated']));
+
+        if ('ok' === $status) {
+            echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('Migration complete and verified. Reload the site to use SQLite. If anything is wrong, roll back below.', 'gratis-db') . '</p></div>';
+            return;
+        }
+        if ('mismatch' === $status) {
+            echo '<div class="notice notice-warning is-dismissible"><p>' . esc_html__('Migration finished but row-count verification found mismatches. The MySQL database is untouched — you can roll back below.', 'gratis-db') . '</p></div>';
+            return;
+        }
+        if ('rolledback' === $status) {
+            echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('Drop-in removed. WordPress will use MySQL on the next page load.', 'gratis-db') . '</p></div>';
+            return;
+        }
+
+        $message = (string) get_transient('gratis_db_migrate_error');
+        delete_transient('gratis_db_migrate_error');
+        echo '<div class="notice notice-error is-dismissible"><p>' . esc_html__('Migration failed:', 'gratis-db') . ' ' . esc_html($message) . '</p></div>';
     }
 
     /** SQLite migration readiness summary. */
@@ -117,6 +189,73 @@ final class Settings {
         echo '<tr><th scope="row">' . esc_html__('ext-sqlite3', 'gratis-db') . '</th><td>' . (extension_loaded('sqlite3') ? esc_html__('Available', 'gratis-db') : esc_html__('Not available', 'gratis-db')) . '</td></tr>';
         echo '<tr><th scope="row">' . esc_html__('db.php drop-in', 'gratis-db') . '</th><td><code>' . esc_html($dropin->currentDropin()) . '</code></td></tr>';
         echo '</tbody></table>';
+    }
+
+    /**
+     * MySQL → SQLite migration panel.
+     *
+     * Capability is verified by render_page(). Uses the lightweight inventory
+     * (table list + row counts) rather than the full filesystem compatibility
+     * scan so the screen stays responsive; the scan still runs at migrate time.
+     */
+    private static function render_migration(): void {
+        $migrator = new Migrator();
+        $dropin   = new DropinManager();
+
+        echo '<h2>' . esc_html__('MySQL → SQLite migration', 'gratis-db') . '</h2>';
+
+        if ($migrator->isAlreadySqlite()) {
+            echo '<p>' . esc_html__('This site already runs on SQLite.', 'gratis-db') . '</p>';
+            if ('gratis-db' === $dropin->currentDropin()) {
+                self::render_rollback_form();
+            }
+            return;
+        }
+
+        $inventory = $migrator->inventory();
+
+        $blockers = [];
+        if (!extension_loaded('pdo_sqlite')) {
+            $blockers[] = __('PHP extension pdo_sqlite is not loaded.', 'gratis-db');
+        }
+        if (null === $dropin->pluginPath()) {
+            $blockers[] = __('The sqlite-database-integration plugin was not found.', 'gratis-db');
+        }
+        foreach ($dropin->canInstall() as $issue) {
+            $blockers[] = $issue;
+        }
+
+        echo '<table class="form-table" role="presentation"><tbody>';
+        echo '<tr><th scope="row">' . esc_html__('Tables', 'gratis-db') . '</th><td>' . esc_html(number_format_i18n(count($inventory['tables']))) . '</td></tr>';
+        echo '<tr><th scope="row">' . esc_html__('Total rows', 'gratis-db') . '</th><td>' . esc_html(number_format_i18n($inventory['total_rows'])) . '</td></tr>';
+        echo '<tr><th scope="row">' . esc_html__('Target SQLite file', 'gratis-db') . '</th><td><code>' . esc_html($dropin->targetSqlitePath()) . '</code></td></tr>';
+        echo '</tbody></table>';
+
+        if (!empty($blockers)) {
+            echo '<div class="notice notice-error inline"><p><strong>' . esc_html__('Migration is blocked:', 'gratis-db') . '</strong></p><ul style="list-style:disc;margin-left:2em;">';
+            foreach ($blockers as $blocker) {
+                echo '<li>' . esc_html($blocker) . '</li>';
+            }
+            echo '</ul></div>';
+            return;
+        }
+
+        echo '<p>' . esc_html__('A pre-migration MySQL backup is taken automatically, and the MySQL database is never modified — you can roll back at any time. Run "wp gratis-db scan" for a full compatibility check first. For large sites, run "wp gratis-db migrate" from WP-CLI to avoid request timeouts.', 'gratis-db') . '</p>';
+
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" onsubmit="return confirm(\'' . esc_js(__('This installs the SQLite drop-in and switches the database backend on the next page load. A MySQL backup is taken first. Continue?', 'gratis-db')) . '\');">';
+        wp_nonce_field('gratis_db_migrate');
+        echo '<input type="hidden" name="action" value="gratis_db_migrate">';
+        submit_button(__('Migrate MySQL → SQLite', 'gratis-db'), 'primary', 'submit', false);
+        echo '</form>';
+    }
+
+    /** Render the rollback button (remove the Gratis-managed drop-in). */
+    private static function render_rollback_form(): void {
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" onsubmit="return confirm(\'' . esc_js(__('Remove the SQLite drop-in and return to MySQL on the next page load?', 'gratis-db')) . '\');">';
+        wp_nonce_field('gratis_db_rollback');
+        echo '<input type="hidden" name="action" value="gratis_db_rollback">';
+        submit_button(__('Roll back to MySQL (remove drop-in)', 'gratis-db'), 'delete', 'submit', false);
+        echo '</form>';
     }
 
     /** Table list + optimize button. */
