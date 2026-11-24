@@ -1,6 +1,6 @@
 # Gratis DB
 
-Optional SQLite WordPress database module. Part of the [Gratis Suite](https://github.com/juslintek/gratis-suite).
+Optional SQLite WordPress database module. Part of the [Gratis Suite](https://gratis.superglobalsdevelopment.com).
 
 ## ⚠️ Safety First
 - Never silently replaces MySQL
