@@ -4,7 +4,7 @@
  * Plugin URI: https://github.com/juslintek/gratis-db
  * Description: Optional SQLite WordPress database module. Compatibility scanner, migration tools, and safety-first db.php drop-in management.
  * Version: 1.0.0
- * Requires at least: 6.0
+ * Requires at least: 6.2
  * Requires PHP: 8.1
  * Author: Linas Jusys
  * Author URI: https://github.com/juslintek
