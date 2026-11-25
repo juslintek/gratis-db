@@ -64,9 +64,8 @@ final class TableOptimizer {
                     break;
                 }
             }
-            // Table identifiers cannot be bound as prepared values; the name is whitelisted above.
-            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
-            $result = $wpdb->query("OPTIMIZE TABLE `{$name}`");
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- explicit admin table optimization.
+            $result = $wpdb->query($wpdb->prepare('OPTIMIZE TABLE %i', $name));
             if (false !== $result) {
                 ++$optimized;
             }

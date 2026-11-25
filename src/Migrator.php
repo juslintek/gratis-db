@@ -120,8 +120,8 @@ final class Migrator {
 				$skipped[] = $name . ' (unsafe identifier)';
 				continue;
 			}
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
-			$count    = (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$safe}`");
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$count    = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM %i', $safe));
 			$tables[] = ['name' => $name, 'rows' => $count];
 			$total   += $count;
 		}
@@ -312,8 +312,8 @@ final class Migrator {
 			if (null === $safe) {
 				continue;
 			}
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
-			$mysql  = (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$safe}`");
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$mysql  = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM %i', $safe));
 			$stmt   = $pdo->query('SELECT COUNT(*) FROM ' . $this->quoteSqliteIdent($name));
 			$sqlite = $stmt ? (int) $stmt->fetchColumn() : -1;
 
@@ -343,10 +343,8 @@ final class Migrator {
 
 		$offset = 0;
 		while (true) {
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			$query = $wpdb->prepare("SELECT * FROM `{$safe}` LIMIT %d OFFSET %d", self::BATCH, $offset);
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared
-			$rows = $wpdb->get_results($query, ARRAY_A);
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$rows = $wpdb->get_results($wpdb->prepare('SELECT * FROM %i LIMIT %d OFFSET %d', $safe, self::BATCH, $offset), ARRAY_A);
 			if (!is_array($rows) || empty($rows)) {
 				break;
 			}
@@ -438,8 +436,8 @@ final class Migrator {
 	/** Read a table's MySQL CREATE statement. */
 	private function showCreate(string $safe): ?string {
 		global $wpdb;
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
-		$row = $wpdb->get_row("SHOW CREATE TABLE `{$safe}`", ARRAY_N);
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange -- read-only SHOW CREATE TABLE introspection.
+		$row = $wpdb->get_row($wpdb->prepare('SHOW CREATE TABLE %i', $safe), ARRAY_N);
 		return is_array($row) ? (string) ($row[1] ?? '') : null;
 	}
 
@@ -502,10 +500,8 @@ final class Migrator {
 
 				$offset = 0;
 				while (true) {
-					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-					$query = $wpdb->prepare("SELECT * FROM `{$safe}` LIMIT %d OFFSET %d", self::BATCH, $offset);
-					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared
-					$rows = $wpdb->get_results($query, ARRAY_A);
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+					$rows = $wpdb->get_results($wpdb->prepare('SELECT * FROM %i LIMIT %d OFFSET %d', $safe, self::BATCH, $offset), ARRAY_A);
 					if (!is_array($rows) || empty($rows)) {
 						break;
 					}

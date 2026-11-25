@@ -1,6 +1,7 @@
 <?php declare(strict_types=1);
 namespace Gratis\DB;
 
+defined('ABSPATH') || exit;
 /** Manages the db.php drop-in for SQLite integration. */
 final class DropinManager {
 
